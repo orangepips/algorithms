@@ -1,6 +1,8 @@
 # http://www.ibi.vu.nl/teaching/masters/prot_struc/2008/ps-lec12-2008.pdf
 # http://ultrastudio.org/en/Nussinov_algorithm
 # http://baba.sourceforge.net/
+# http://math.mit.edu/classes/18.417/Slides/rna-prediction-nussinov.pdf
+# https://www.csee.umbc.edu/courses/undergraduate/441/fall16_marron/projects/proj1/desc.shtml
 
 # Looking at our example sequence, we can write-down a valid line folding:
 #
@@ -18,34 +20,56 @@
 # S = {(1, 12), (3, 10), (4, 9)}
 
 from memoize import memoize
-from inspect import getouterframes, currentframe
-from random import random
+import data
 
 class Russinov:
-    min_distance = 4
-    valid_pairs = frozenset(["HG", "GH", "WT", "TW", "GC", "CG", "UA", "AU"])
-    pairs = set()
+    DEFAULT_MIN_DISTANCE = 4
+    DEFAULT_VALID_PAIRS = data.DATA['RNA']['valid_pairs']
 
-    def __init__(self, A):
-        self.A = A
-        self.A_len = len(A)
-        self.matrix = [[(0, []) for x in range(self.A_len)] for y in range(self.A_len)]
-        for i in range(self.A_len):
+    def __init__(self, letters, min_distance=DEFAULT_MIN_DISTANCE, valid_pairs=DEFAULT_VALID_PAIRS):
+        '''
+        Produce a Nussinov matrix as the 'matrix' instance variable and calculate all the valid pairs relative to the
+        supplied min_distance and valid_pairs arguments from the letters argument.
+
+        Parameters
+        ----------
+        letters: list of letters to evaluate for pairings
+        min_distance: non inclusive distance between letters necessary for a pair to be allowed
+        valid_pairs: iterable with valid pairings of two letters, note AB is not the same as BA, so add both if
+            considered valid
+        '''
+        self.letters = letters
+        self.letters_len = len(letters)
+        self.min_distance = min_distance
+        self.valid_pairings = valid_pairs
+        self.found_pairs = set()
+        self.matrix = [[(0, []) for x in range(self.letters_len)] for y in range(self.letters_len)]
+        for i in range(self.letters_len):
             self.matrix[i][i] = (0, [])
             if i > 0:
                 self.matrix[i][i-1] = (0, [])
 
-        # print("START\n" + self.__str__() + "\n")
+        self.expected_pairs_count = self.opt(self, 0, self.letters_len - 1)
 
-        self.expected_pairs_count = self.opt(self, 0, self.A_len - 1)
-
-        self.traceback(0, self.A_len - 1)
+        self.traceback(0, self.letters_len - 1)
 
     @memoize
     def opt(self, i, j):
+        '''
+        Count the number of valid pairings with the letter range from i to j inclusive. Associate back pointers for in
+        the matrix for the traceback method to use to produce the actual pairings.
+
+        Parameters
+        ----------
+        i: start of the letter range
+        j: end of the letter range
+
+        Returns
+        -------
+        number of pairs found within the range i, j for a given minimum_distance
+        '''
         if j - i <= self.min_distance: return 0  # no sharp turns
 
-        level = len(getouterframes(currentframe(1)))
         pointers = list()
 
         best_k = 0
@@ -57,78 +81,107 @@ class Russinov:
             if best_k > prior_best_k:
                 pointers = [(i, k), (k+1, j)]
 
-        result = max(best_k, self.s(self.A[i], self.A[j]) + self.opt(self, i + 1, j - 1))
+        result = max(best_k, (1 if self.is_valid_pair(i, j) else 0) + self.opt(self, i + 1, j - 1))
         if result > best_k:
             pointers = [(i+1, j-1)]
 
         self.matrix[i][j] = (result, pointers)
 
-        # print("Level: " + str(level) + "\t" + str(i) + ", " + str(j) + "\n" + self.__str__() + "\n")
-
         return result
 
-    # http://math.mit.edu/classes/18.417/Slides/rna-prediction-nussinov.pdf "Nussinov Algorithm - Traceback Pseudo-Code"
     def traceback(self, i, j):
-        # level = len(getouterframes(currentframe(1)))
-        # print(level, i, j)
+        '''
+        Produce the actual pairings found with the range i, j inclusive for the letters used to construct the matrix.
+        Parameters
+        ----------
+        i: start of the letter range
+        j: end of the letter range
+
+        Returns
+        -------
+        populates the found_pairs variable
+        '''
         if j - i <= self.min_distance:
             return
 
-        if self.s(self.A[i], self.A[j]): self.pairs.add((i, j))
+        if self.is_valid_pair(i, j): self.found_pairs.add((i, j))
 
         pointers = self.matrix[i][j][1]
 
-        print(i, j, self.matrix[i][j][1])
-
+        next_pointer = None
+        max_result = 0
         for pointer in pointers:
             self.traceback(pointer[0], pointer[1])
+            # this_result = self.matrix[pointer[0]][pointer[1]]
+            # if this_result[0] >= max_result:
+            #     next_pointer = pointer
+
+        # if next_pointer is not None:
+        #     self.traceback(next_pointer[0], next_pointer[1])
 
         return
 
-    def s(self, xi, xj):
-        return 1 if xi + xj in self.valid_pairs else 0
+    def is_valid_pair(self, i, j):
+        if j - i <= self.min_distance: return False
+
+        #  Pairs do not talk over each other. If (ij) and (kl) are two pairs in S, then we cannot have i < k < j < l
+        #  A member of a pair can only be used once
+        for found_pair in self.found_pairs:
+            k = found_pair[0]
+            l = found_pair[1]
+            is_out_of_order = i < k < j < l
+            is_member_in_use = i == k or i == l or j == k or j == l
+            if is_out_of_order or is_member_in_use:
+                # print("is_out_of_order, is_member_in_use, i, j", is_out_of_order, is_member_in_use, i, j)
+                return False
+
+        xi, xj = self.letters[i], self.letters[j]
+        return xi + xj in self.valid_pairings
 
     def __str__(self):
-        print("expected_pairs_count:\t" + str(self.expected_pairs_count))
         rows = list()
-        rows.append(' \t' + '\t'.join([letter for letter in self.A]))
-        for i in range(self.A_len):
+        rows.append(' \t' + '\t'.join([letter for letter in self.letters]))
+        for i in range(self.letters_len):
             row = list()
-            row.append(self.A[i])
-            for j in range(self.A_len):
+            row.append(self.letters[i])
+            for j in range(self.letters_len):
                 pair_star = ''
-                if j - i > self.min_distance and self.s(self.A[i], self.A[j]) == 1:
+                if j - i > self.min_distance and self.is_valid_pair(i, j):
                     pair_star = '*'
                 row.append(str(self.matrix[i][j][0]) + pair_star)
             rows.append('\t'.join(row))
 
         lettered_pairs = list()
-        for pair in self.pairs:
-            l = self.A[pair[0]]
-            r = self.A[pair[1]]
-            lettered_pairs.append( l + ":" + str(pair[0]) + "," + r + ":" + str(pair[1]) )
+        sorted_found_pairs = sorted(list(self.found_pairs), key=lambda tup: tup[0])
+        index = 1
+        for pair in sorted_found_pairs:
+            l = self.letters[pair[0]]
+            r = self.letters[pair[1]]
+            lettered_pairs.append(str(index) + ".\t" +  l + " (" + str(pair[0]) + "),\t" + r + ": (" + str(pair[1]) + ")" )
+            index += 1
 
-        return '\n'.join(rows) + ('\n' + str('\n'.join(lettered_pairs)) if len(lettered_pairs) else '')
+        return '\nNussinov Matrix (* - valid pairing):\n\t' + '\n\t'.join(rows) + \
+               '\nValid Pairs (expected ' + str(self.expected_pairs_count) + '):' + \
+               ('\n\t' + str('\n\t'.join(lettered_pairs)) if len(lettered_pairs) else '')
 
-
-LETTERS = ["H", "G", "T", "W"]
-def letters(x):
-    return [random.choice(LETTERS) for _ in range(x)]
 
 def main():
-    A = ("H", "G", "G", "T", "H", "W", "H", "W", "W", "H", "T", "G")
-    r = Russinov(A)
-    print(r)
-
-    B = ("A", "C", "U", "C", "G", "G", "U", "U", "A", "C", "G", "A", "G")
+    # A = ("H", "G", "G", "T", "H", "W", "H", "W", "W", "H", "T", "G")
+    # r = Russinov(A, valid_pairs=data.DATA['CMSC-441']['valid_pairs'])
+    # print(r)
+    #
+    # B = ("A", "C", "U", "C", "G", "G", "U", "U", "A", "C", "G", "A", "G")
     # r2 = Russinov(B)
     # print(r2)
-
-    C = ("G", "C", "A", "C", "G", "A", "C", "G")
+    #
+    # C = ("G", "C", "A", "C", "G", "A", "C", "G")
     # r3 = Russinov(C)
     # print(r3)
-    pass
 
+    D = data.random_alpha(50)
+    r4 = Russinov(D)
+    print(r4)
+    pass
 
 if __name__ == "__main__":
     main()
