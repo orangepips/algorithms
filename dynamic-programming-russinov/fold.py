@@ -16,17 +16,7 @@ import Queue
 #
 # S = {(1, 12), (3, 10), (4, 9)}
 
-def memoize(f):
-    """ Memoization decorator for functions taking one or more arguments. """
-    class memodict(dict):
-        def __init__(self, f):
-            self.f = f
-        def __call__(self, *args):
-            return self[args]
-        def __missing__(self, key):
-            ret = self[key] = self.f(*key)
-            return ret
-    return memodict(f)
+from memoize import memoize
 
 @memoize
 def cutRod(prices, n):

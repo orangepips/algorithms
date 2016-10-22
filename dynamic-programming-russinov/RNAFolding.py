@@ -174,7 +174,9 @@ def traceback(F, sigma, seq, comp, starti, startj) :
     return struct
 
 # main entry point for the script is here
-seq = "GAAGUUGGGCCG"
+# seq = "GAAGUUGGGCCG"
+seq = "C", "G", "G", "A", "C", "U", "C", "U", "U", "C", "A", "G"
+seq = ''.join(seq)
 n = len(seq)
 
 # setup the cost matrix - this is clunky, would do better to load it from a file
