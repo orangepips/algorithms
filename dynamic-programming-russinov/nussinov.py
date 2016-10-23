@@ -21,6 +21,11 @@
 
 from memoize import memoize
 import data
+from inspect import getouterframes, currentframe
+import Queue
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 class Russinov:
     DEFAULT_MIN_DISTANCE = 4
@@ -42,7 +47,7 @@ class Russinov:
         self.letters_len = len(letters)
         self.min_distance = min_distance
         self.valid_pairings = valid_pairs
-        self.found_pairs = set()
+        self.found_pairs = list()
         self.matrix = [[(0, []) for x in range(self.letters_len)] for y in range(self.letters_len)]
         for i in range(self.letters_len):
             self.matrix[i][i] = (0, [])
@@ -51,12 +56,12 @@ class Russinov:
 
         self.expected_pairs_count = self.opt(self, 0, self.letters_len - 1)
 
-        self.traceback(0, self.letters_len - 1)
+        self.traceback(self, 0, self.letters_len - 1)
 
     @memoize
     def opt(self, i, j):
         '''
-        Count the number of valid pairings with the letter range from i to j inclusive. Associate back pointers for in
+        Count the number of valid pairings with the letter range from i to j inclusive. Associate back pointers  in
         the matrix for the traceback method to use to produce the actual pairings.
 
         Parameters
@@ -70,27 +75,56 @@ class Russinov:
         '''
         if j - i <= self.min_distance: return 0  # no sharp turns
 
-        pointers = list()
+        pq_opt_val = Queue.PriorityQueue()
 
-        best_k = 0
+        diagonal_opt_val = (1 if self.is_valid_pair(i, j) else 0) + self.opt(self, i + 1, j - 1)
+        pq_opt_val.put((-diagonal_opt_val, [(i+1, j-1)]))
+
         # i <= k < j
         # opt(i, k) + opt(k + 1, j)
         for k in range(i, j):
-            prior_best_k = best_k
-            best_k = max(best_k, self.opt(self, i, k) + self.opt(self, k + 1, j))
-            if best_k > prior_best_k:
-                pointers = [(i, k), (k+1, j)]
+           k_opt_val = self.opt(self, i, k) + self.opt(self, k + 1, j)
+           pq_opt_val.put((-k_opt_val, [(i, k), (k + 1, j)]))
 
-        result = max(best_k, (1 if self.is_valid_pair(i, j) else 0) + self.opt(self, i + 1, j - 1))
-        if result > best_k:
-            pointers = [(i+1, j-1)]
+        pointers = Queue.PriorityQueue()
+        highest_opt_val = pq_opt_val.get()
+        result = -highest_opt_val[0]
+        # pointers.extend(highest_opt_val[1])
+        pointers = self._prioritize_pointers(i, j, pointers, highest_opt_val[1])
+
+        while not pq_opt_val.empty():
+            next_opt_val = pq_opt_val.get()
+            if -next_opt_val[0] == result:
+                pointers = self._prioritize_pointers(i, j, pointers, next_opt_val[1])  # .extend(next_opt_val[1])
 
         self.matrix[i][j] = (result, pointers)
 
         return result
 
+    def _prioritize_pointers(self, i, j, pointers, candidates):
+        '''
+        Place candidates into the passed pointers queue by computing a delta between i & j and candidate.
+        Delta is calculated as the absolute difference been the first and second positions of each.
+        Parameters
+        ----------
+        i: current letter list start
+        j: current letter list end
+        pointers: priority queue of pointers
+        candidates: candidates to insert into the queue
+
+        Returns
+        -------
+        All passed candidates inserted into the pointers queue by the basis of their delta with i, j
+        '''
+        for candidate in candidates:
+            delta = abs(i - candidate[0]) + abs(j - candidate[1])
+            pointers.put( (delta, candidate) )
+        return pointers
+
+    @memoize
     def traceback(self, i, j):
         '''
+        http://forrestbao.blogspot.com/2007/11/python-implementation-of-nussinov.html
         Produce the actual pairings found with the range i, j inclusive for the letters used to construct the matrix.
         Parameters
         ----------
@@ -103,44 +137,60 @@ class Russinov:
         '''
         if j - i <= self.min_distance:
             return
+        elif len(self.found_pairs) == self.expected_pairs_count:
+            return
 
-        if self.is_valid_pair(i, j): self.found_pairs.add((i, j))
+        this_opt_val = self._get_opt_val(i, j)
+        if this_opt_val == self._get_opt_val(i + 1, j):
+            self.traceback(self, i + 1, j)
+        elif this_opt_val == self._get_opt_val(i, j - 1):
+            self.traceback(self, i, j - 1)
+        elif this_opt_val == self._get_opt_val(i + 1, j - 1) + (1 if self.is_valid_pair(i, j) else 0):
+            self.found_pairs.append((i, j))
+            self.traceback(self, i + 1, j - 1)
+        else:
+            for k in xrange(i + 1, j):
+                if this_opt_val == self._get_opt_val(i, k) + self._get_opt_val(k + 1, j):
+                    self.traceback(self, i, k)
+                    self.traceback(self, k + 1, j)
 
-        pointers = self.matrix[i][j][1]
+    def _get_opt_val(self, i, j):
+        return self.matrix[i][j][0]
 
-        next_pointer = None
-        max_result = 0
-        for pointer in pointers:
-            self.traceback(pointer[0], pointer[1])
-            # this_result = self.matrix[pointer[0]][pointer[1]]
-            # if this_result[0] >= max_result:
-            #     next_pointer = pointer
+    def is_valid_pair(self, i, j, check_found_pairs=False):
+        '''
+        Examine letters in the i and j position to see if they can be paired.
+        Parameters
+        ----------
+        i: first letter position
+        j: second letter position
+        check_found_pairs: if algorithm should examine existing pairs to ensure no overlap or position reuse
 
-        # if next_pointer is not None:
-        #     self.traceback(next_pointer[0], next_pointer[1])
-
-        return
-
-    def is_valid_pair(self, i, j):
+        Returns
+        -------
+        Boolean indicating if all checks passed if specified and that the letters are a valid pair
+        '''
         if j - i <= self.min_distance: return False
 
         #  Pairs do not talk over each other. If (ij) and (kl) are two pairs in S, then we cannot have i < k < j < l
         #  A member of a pair can only be used once
-        for found_pair in self.found_pairs:
-            k = found_pair[0]
-            l = found_pair[1]
-            is_out_of_order = i < k < j < l
-            is_member_in_use = i == k or i == l or j == k or j == l
-            if is_out_of_order or is_member_in_use:
-                # print("is_out_of_order, is_member_in_use, i, j", is_out_of_order, is_member_in_use, i, j)
-                return False
+        if check_found_pairs:
+            for found_pair in self.found_pairs:
+                k = found_pair[0]
+                l = found_pair[1]
+                is_out_of_order = i < k < j < l
+                is_member_in_use = i == k or i == l or j == k or j == l
+                if is_out_of_order or is_member_in_use:
+                    return False
 
         xi, xj = self.letters[i], self.letters[j]
         return xi + xj in self.valid_pairings
 
     def __str__(self):
         rows = list()
-        rows.append(' \t' + '\t'.join([letter for letter in self.letters]))
+        rows.append(' \t\t' + '\t'.join([str(n) for n in range(self.letters_len)]))
+        rows.append(' \t\t' + '\t'.join([letter for letter in self.letters]))
+        col_idx = 0
         for i in range(self.letters_len):
             row = list()
             row.append(self.letters[i])
@@ -149,10 +199,11 @@ class Russinov:
                 if j - i > self.min_distance and self.is_valid_pair(i, j):
                     pair_star = '*'
                 row.append(str(self.matrix[i][j][0]) + pair_star)
-            rows.append('\t'.join(row))
+            rows.append(str(col_idx) + '\t' + '\t'.join(row))
+            col_idx += 1
 
         lettered_pairs = list()
-        sorted_found_pairs = sorted(list(self.found_pairs), key=lambda tup: tup[0])
+        sorted_found_pairs = self.found_pairs
         index = 1
         for pair in sorted_found_pairs:
             l = self.letters[pair[0]]
@@ -167,7 +218,7 @@ class Russinov:
 
 def main():
     # A = ("H", "G", "G", "T", "H", "W", "H", "W", "W", "H", "T", "G")
-    # r = Russinov(A, valid_pairs=data.DATA['CMSC-441']['valid_pairs'])
+    # r = Russinov(A, valid_pairs=data.DATA['CCB']['valid_pairs'])
     # print(r)
     #
     # B = ("A", "C", "U", "C", "G", "G", "U", "U", "A", "C", "G", "A", "G")
@@ -178,9 +229,20 @@ def main():
     # r3 = Russinov(C)
     # print(r3)
 
-    D = data.random_alpha(50)
-    r4 = Russinov(D)
-    print(r4)
+    # D = data.random_alpha(30)
+    # r4 = Russinov(D)
+    # print(r4)
+
+    # E = ("U", "G", "U", "A", "A", "C", "C", "G", "C", "A", "A", "G", "G", "G", "G", "A", "C", "A", "G", "C", "A", "U", "A", "C", "C", "C", "U", "U", "U", "C")
+    # r5 = Russinov(E)
+    # print(r5)
+
+    # F = ("C", "A", "C", "C", "G", "G", "U", "G", "A", "A", "C", "A", "U", "A", "A", "U", "U", "C", "C", "A", "A", "G",
+    #      "C", "C", "G", "U", "C", "U", "G", "A", "U", "U", "U", "U", "C", "A", "A", "U", "C", "U", "C", "G", "C", "A",
+    #      "U", "A", "U", "G", "G", "C")
+    # r_f = Russinov(F)
+    # print(r_f)
+
     pass
 
 if __name__ == "__main__":

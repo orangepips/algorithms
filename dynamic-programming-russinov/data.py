@@ -5,7 +5,7 @@ DATA = {
         'alphabet': ["A", "C", "U", "G"],
         'valid_pairs': ["GC", "CG", "UA", "AU"]
     },
-    'CMSC-441': {
+    'CCB': {
         'alphabet': ["H", "G", "T", "W"],
         'valid_pairs': ["HG", "GH", "WT", "TW"]
     }
