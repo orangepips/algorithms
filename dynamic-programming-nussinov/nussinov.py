@@ -173,9 +173,8 @@ class Russinov:
             col_idx += 1
 
         lettered_pairs = list()
-        sorted_found_pairs = self.found_pairs
         index = 1
-        for pair in sorted_found_pairs:
+        for pair in self.found_pairs:
             l = self.letters[pair[0]]
             r = self.letters[pair[1]]
             lettered_pairs.append(str(index) + ".\t" +  l + " (" + str(pair[0]) + "),\t" + r + ": (" + str(pair[1]) + ")" )
@@ -207,15 +206,15 @@ def main():
     # r5 = Russinov(E)
     # print(r5)
 
-    # F = ("C", "A", "C", "C", "G", "G", "U", "G", "A", "A", "C", "A", "U", "A", "A", "U", "U", "C", "C", "A", "A", "G",
-    #      "C", "C", "G", "U", "C", "U", "G", "A", "U", "U", "U", "U", "C", "A", "A", "U", "C", "U", "C", "G", "C", "A",
-    #      "U", "A", "U", "G", "G", "C")
-    # r_f = Russinov(F)
-    # print(r_f)
+    F = ("C", "A", "C", "C", "G", "G", "U", "G", "A", "A", "C", "A", "U", "A", "A", "U", "U", "C", "C", "A", "A", "G",
+         "C", "C", "G", "U", "C", "U", "G", "A", "U", "U", "U", "U", "C", "A", "A", "U", "C", "U", "C", "G", "C", "A",
+         "U", "A", "U", "G", "G", "C")
+    r_f = Russinov(F)
+    print(r_f)
 
-    G = data.random_alpha(20)
-    r_g = Russinov(G)
-    print(r_g)
+    # G = data.random_alpha(100)
+    # r_g = Russinov(G)
+    # print(r_g)
 
     pass
 
